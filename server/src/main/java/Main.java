@@ -1,13 +1,12 @@
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.Javalin;
-import io.javalin.websocket.WsContext;
 
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Main {
-    private static final Set<WsContext> connectedClients = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private static final Set<User> connectedClients = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     public static void main(String[] args) {
         ObjectMapper objectMapper = new ObjectMapper();
@@ -22,30 +21,32 @@ public class Main {
         app.ws("/", ws -> {
 
             ws.onConnect((connectContext) -> {
-                connectedClients.add(connectContext);
+                User user = new User(connectContext.sessionId(), connectContext);
+                connectedClients.add(user);
                 System.out.println("Connected: " + connectContext.sessionId());
             });
 
             ws.onMessage((messageContext) -> {
                 System.out.println("Message: " + messageContext.sessionId());
                 Message message = objectMapper.readValue(messageContext.message(), Message.class);
-                if (message.getRecipientID().isEmpty()) {
-                    for (WsContext client : connectedClients) {
-                        if (!client.sessionId().equals(messageContext.sessionId())) {
-                            client.send(new HashMap<>(Map.of("senderId", 0, "content", "Hello from the server!")));
+                for (User client : connectedClients) {
+                    if (message.getRecipientID().isEmpty()) {
+                        if (!client.getId().equals(messageContext.sessionId())) {
+                            client.receiveMessage(message);
                         }
+                    }
+                    if (client.getId().equals(message.getRecipientID())) {
+                        client.receiveMessage(message);
                     }
                 }
             });
 
             ws.onClose((closeContext) -> {
-                connectedClients.remove(closeContext);
+                connectedClients.removeIf(client -> client.getId().equals(closeContext.sessionId()));
                 System.out.println("Closed: " + closeContext.sessionId());
             });
 
-            ws.onError((errorContext) -> {
-                System.out.println("Error: " + errorContext.sessionId());
-            });
+            ws.onError((errorContext) -> System.out.println("Error: " + errorContext.sessionId()));
 
         });
 
